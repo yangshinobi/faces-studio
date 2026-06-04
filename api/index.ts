@@ -1,92 +1,97 @@
 import { Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
-import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { appRouter } from "./router.js";
-import { createContext } from "./context.js";
+import { Resend } from "resend";
 
 const app = new Hono();
-
-app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
 // Health check
 app.get("/api/ping", (c) => c.json({ ok: true, ts: Date.now() }));
 
-// tRPC handler
-app.use("/api/trpc/*", async (c) => {
+// Contact form
+import { z } from "zod";
+
+const contactSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  phone: z.string().min(1),
+  service: z.string().optional(),
+  addons: z.array(z.string()).optional(),
+  preferredDate: z.string().optional(),
+  preferredTime: z.string().optional(),
+  message: z.string().min(1),
+});
+
+app.post("/api/contact", async (c) => {
   try {
-    return await fetchRequestHandler({
-      endpoint: "/api/trpc",
-      req: c.req.raw,
-      router: appRouter,
-      createContext,
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) return c.json({ success: false, error: "Contact form not configured" }, 500);
+
+    const body = await c.req.json();
+    const parsed = contactSchema.safeParse(body);
+    if (!parsed.success) return c.json({ success: false, error: "Invalid input" }, 400);
+
+    const { name, email, phone, service, addons, preferredDate, preferredTime, message } = parsed.data;
+    const resend = new Resend(apiKey);
+
+    const addonNames: Record<string, string> = {
+      "lash-tint": "Wimpern färben (CHF 35.–)",
+      "brow-tint": "Brauen färben (CHF 25.–)",
+      "brow-shape": "Brauen zupfen (CHF 25.–)",
+      "lip-wax": "Oberlippe wachsen (CHF 25.–)",
+    };
+    const addonsText = addons?.length
+      ? addons.map((a) => addonNames[a] || a).join("\n  - ")
+      : "None";
+
+    const { data, error } = await resend.emails.send({
+      from: "Faces Studio <onboarding@resend.dev>",
+      to: ["hello@faces-studio.ch"],
+      replyTo: email,
+      subject: `Neue Terminanfrage von ${name}`,
+      text: [
+        `NEUE TERMINANFRAGE — FACES STUDIO`,
+        `Name: ${name}`,
+        `E-Mail: ${email}`,
+        `Telefon: ${phone}`,
+        `Service: ${service || "-"}`,
+        `Add-ons: ${addonsText}`,
+        `Wunschtermin: ${preferredDate || "-"} ${preferredTime || "-"}`,
+        `Nachricht: ${message}`,
+      ].join("\n"),
     });
+
+    if (error) return c.json({ success: false, error: error.message }, 500);
+    return c.json({ success: true, id: data?.id });
   } catch (err: any) {
-    console.error("[API] tRPC error:", err.message);
-    return c.json(
-      {
-        error: { message: err.message || "Internal Server Error" },
-      },
-      500
-    );
+    return c.json({ success: false, error: err.message || "Internal error" }, 500);
   }
 });
 
-// 404 for unmatched API routes
+// 404
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
-// Vercel Node.js serverless handler
-// @ts-ignore
+// Vercel handler
 export default async function handler(req: any, res: any) {
-  console.log(`[API] ${req.method} ${req.url}`);
-
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
-  res.setHeader("Access-Control-Allow-Headers", "X-CSRF-Token, X-Requested-With, Accept, Content-Type, Date, X-Api-Version, x-admin-token");
-
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
+  const protocol = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers.host || "localhost";
+  const url = `${protocol}://${host}${req.url}`;
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (v === undefined) continue;
+    if (Array.isArray(v)) for (const x of v) headers.append(k, x);
+    else headers.set(k, v);
   }
-
+  let body: string | undefined;
+  if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
+    headers.set("content-type", "application/json");
+    body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+  }
   try {
-    const protocol = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers.host || "localhost";
-    const url = `${protocol}://${host}${req.url}`;
-
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value === undefined) continue;
-      if (Array.isArray(value)) {
-        for (const v of value) headers.append(key, v);
-      } else if (typeof value === "string") {
-        headers.set(key, value);
-      }
-    }
-
-    let body: string | undefined;
-    if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
-      headers.set("content-type", "application/json");
-      body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-    }
-
-    const fetchReq = new Request(url, {
-      method: req.method,
-      headers,
-      body,
-    });
-
-    const response = await app.fetch(fetchReq);
-    console.log(`[API] Response: ${response.status}`);
-
+    const response = await app.fetch(new Request(url, { method: req.method, headers, body }));
     res.statusCode = response.status;
-    response.headers.forEach((value: string, key: string) => {
-      res.setHeader(key, value);
-    });
-
-    const responseBody = await response.text();
-    res.end(responseBody);
+    response.headers.forEach((v: string, k: string) => res.setHeader(k, v));
+    res.end(await response.text());
   } catch (err: any) {
-    console.error("[API] Fatal error:", err.message);
-    res.status(500).json({ error: err.message || "Internal Server Error" });
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: err.message }));
   }
 }
