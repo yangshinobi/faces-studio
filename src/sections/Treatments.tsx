@@ -118,7 +118,7 @@ const TREATMENTS: TreatmentData[] = [
     subtitleDe: 'Für zeitlose Ausstrahlung & sichtbar gestraffte Haut',
     subtitleEn: 'Timeless Radiance & Visibly Lifted Skin',
     specialDe: 'Spezial: hochwertige Alginat Maske',
-    specialEn: 'Spezial: hochwertige Alginat Maske',
+    specialEn: 'Special: premium Alginate Mask',
     descDe: 'Diese revitalisierende Premium-Behandlung ist auf Kollagenstimulation, Lifting und tiefen Glow ausgerichtet – ganz ohne invasive Eingriffe. Nach Reinigung und Peeling wird ein hochwirksames Serum via Gua-Sha-Massage in Gesicht und Dekolleté eingearbeitet. Eine reichhaltige Anti-Aging-Maske und entspannende Kopfmassage runden das Erlebnis ab. Abschlusspflege.',
     descEn: "This revitalizing premium treatment is all about collagen stimulation, lifting, and deep hydration glow — completely non-invasive. After cleansing and exfoliation, a potent serum is massaged into your face and décolleté using Gua Sha technique. A rich anti-aging mask and relaxing scalp massage complete the experience. Finishing care. Think of it as a gym session for your face — toned, lifted, and absolutely glowing.",
     bulletsDe: [
@@ -354,16 +354,6 @@ export default function Treatments() {
       </div>
 
       <TreatmentCard t={TREATMENTS[0]} index={0} />
-
-      <div style={{ backgroundColor: '#f6f3ee', padding: '60px 40px 20px', textAlign: 'center' }}>
-        <span style={{
-          display: 'inline-block', fontFamily: 'var(--font-body)', fontSize: '11px', fontWeight: 500,
-          textTransform: 'uppercase', letterSpacing: '0.15em', color: '#ff5757',
-          border: '1px solid #ff5757', borderRadius: '24px', padding: '10px 28px',
-        }}>
-          {isDe ? 'Verfügbare Behandlungen' : 'Available Treatments'}
-        </span>
-      </div>
 
       {TREATMENTS.slice(1).map((t, i) => (
         <TreatmentCard key={t.id} t={t} index={i + 1} />
